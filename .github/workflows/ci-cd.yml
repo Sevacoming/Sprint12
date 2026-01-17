@@ -1,0 +1,56 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ['main', 'master']
+    tags:
+      - 'v*'
+  pull_request:
+    branches: ['main', 'master']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: gofmt
+        run: |
+          test -z "$(gofmt -l .)" || (echo "Run gofmt -w ." && exit 1)
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: prepare db
+        run: |
+          rm -f tracker.db
+          sqlite3 tracker.db "CREATE TABLE IF NOT EXISTS parcel (number INTEGER PRIMARY KEY AUTOINCREMENT, client INTEGER, status TEXT, address TEXT, created_at TEXT);"
+
+      - name: go test
+        run: go test ./... -v
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/parcel-tracker:latest
